@@ -6,10 +6,18 @@ import sys
 import asyncio
 import aiohttp
 import logging
+from aiohttp.abc import AbstractAccessLogger
 
 import eternalegypt
 
 logging.basicConfig(level=logging.DEBUG)
+
+class AccessLogger(AbstractAccessLogger):
+
+    def log(self, request, response, time):
+        self.logger.info(f'{request.remote} '
+                         f'"{request.method} {request.path} '
+                         f'done in {time}s: {response.status}')
 
 
 async def send_message():
@@ -20,7 +28,7 @@ async def send_message():
     modem = eternalegypt.Modem(hostname=sys.argv[1], websession=websession)
     await modem.login(password=sys.argv[2])
 
-    await modem.sms(phone=sys.argv[3], message=sys.argv[4])
+    #await modem.sms(phone=sys.argv[3], message=sys.argv[4])
 
     await modem.logout()
     await websession.close()

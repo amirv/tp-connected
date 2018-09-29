@@ -77,23 +77,32 @@ class MR6400:
         self.token = None
 
     async def encryptCredentials(self, password=None, username=None):
-        # try:
-        #     async with async_timeout.timeout(TIMEOUT):
-        #         url = self._url('cgi/getParm')
-        #         headers= { 'Referer': self._baseurl }
+        try:
+            async with async_timeout.timeout(TIMEOUT):
+                url = self._url('cgi/getParm')
+                headers= { 'Referer': self._baseurl }
 
-        #         _LOGGER.info(url)
-        #         async with self.websession.post(url, headers=headers) as response:
-        #             if response.status != 200:
-        #                 _LOGGER.error("Invalid encryption key request")
-        #                 raise Error()
-                
-        #             result = await response.text()
-                
-                    
+                _LOGGER.info(url)
+                async with self.websession.post(url, headers=headers) as response:
+                    if response.status != 200:
+                        _LOGGER.error("Invalid encryption key request")
+                        raise Error()
+                    responseText = await response.text()
+                    eeExp = re.compile(r'(?<=ee=")(.{5}(?:\s|.))', re.IGNORECASE)
+                    eeString = eeExp.search(responseText)
+                    if eeString:
+                        _LOGGER.debug("ee: %s", eeString.group(1) )
+                        ee = eeString.group(1) 
+                    nnExp = re.compile(r'(?<=nn=")(.{255}(?:\s|.))', re.IGNORECASE)
+                    nnString = nnExp.search(responseText)
+                    if nnString:
+                        _LOGGER.debug("nn: %s", nnString.group(1) )
+                        nn = nnString.group(1)                  
 
-        # except (asyncio.TimeoutError, ClientError, Error):
-        #     raise Error("Could not retrieve encryption key")
+        except (asyncio.TimeoutError, ClientError, Error):
+            raise Error("Could not retrieve encryption key")
+
+        print(ee,nn)
 
         if password is None:
             password = self.password
@@ -106,40 +115,32 @@ class MR6400:
             self.username = username
 
         username64 = base64.b64encode(password.encode("utf-8"))
-        cmd = "node ./eternalegypt/encryptPolyfill.js {0} {1} {2}".format(username64.decode('UTF-8'), "C65F6A09263C7B4CCC58B98955634559E615A5A4462F0A8CCAA02195E0C8B6E2FA75D87CC6C80BC97B287879BE6916D4C8A2B4BCB2416FF96499770F5B4D68AFA5BE448D2316362623D9A0D2259CCFBD02FB480B3BAC13BF01A55004C19FCAF2F5783B29011422695495E03D3722DEF344C3BB3EDD5432B0C2EE0BCA3323A447", "010001");
+        cmd = "node ./eternalegypt/encryptPolyfill.js {0} {1} {2}".format(username64.decode('UTF-8'), nn, ee);
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE)
 
         stdout, stderr = await proc.communicate()
-
-        #print(f'[{cmd!r} exited with {proc.returncode}]')
-        if stdout:
-            self._encryptedUsername = stdout.decode().strip();
-            print(f'[stdout]\n{stdout.decode()}')
-        if stderr:
-            print(f'[stderr]\n{stderr.decode()}')
-        
-
-        
-        password64 = base64.b64encode(password.encode("utf-8"))
-        cmd = "node ./eternalegypt/encryptPolyfill.js {0} {1} {2}".format(password64.decode('UTF-8'), "C65F6A09263C7B4CCC58B98955634559E615A5A4462F0A8CCAA02195E0C8B6E2FA75D87CC6C80BC97B287879BE6916D4C8A2B4BCB2416FF96499770F5B4D68AFA5BE448D2316362623D9A0D2259CCFBD02FB480B3BAC13BF01A55004C19FCAF2F5783B29011422695495E03D3722DEF344C3BB3EDD5432B0C2EE0BCA3323A447", "010001");
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
-
-        stdout, stderr = await proc.communicate()
-
         print(f'[{cmd!r} exited with {proc.returncode}]')
         if stdout:
-            self._encryptedPassword = stdout.decode().strip();
-            print(f'[stdout]\n{stdout.decode()}')
+            self._encryptedUsername = stdout.decode().strip();
         if stderr:
             print(f'[stderr]\n{stderr.decode()}')
+        
+        password64 = base64.b64encode(password.encode("utf-8"))
+        cmd = "node ./eternalegypt/encryptPolyfill.js {0} {1} {2}".format(password64.decode('UTF-8'), nn, ee);
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
 
-        print("_______{0}_________{1}_____".format(self._encryptedUsername, self._encryptedPassword))
+        stdout, stderr = await proc.communicate()
+
+        if stdout:
+            self._encryptedPassword = stdout.decode().strip();
+        if stderr:
+            print(f'[stderr]\n{stderr.decode()}')
 
     
     async def login(self, password=None, username=None):
@@ -153,7 +154,6 @@ class MR6400:
 
                 _LOGGER.info(url)
                 async with self.websession.post(url, params=params, headers=headers) as response:
-                    print(response)
                     if response.status != 200:
                         _LOGGER.error("Invalid login request")
                         raise Error()
