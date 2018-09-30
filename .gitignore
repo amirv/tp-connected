@@ -2,7 +2,7 @@
 /bin
 /dist
 /lib
-/eternalegypt.egg-info
+/tp_connected.egg-info
 pyvenv.cfg
 __pycache__
 

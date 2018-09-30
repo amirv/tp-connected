@@ -8,9 +8,6 @@ from aiohttp.client_exceptions import ClientError
 import async_timeout
 import attr
 import base64
-from Crypto.Hash import SHA
-from Crypto.PublicKey import RSA
-from Crypto.Signature import PKCS1_v1_5
 
 TIMEOUT = 3
 
@@ -76,25 +73,23 @@ class MR6400:
         self.websession = None
         self.token = None
 
+    async def encryptString(self, value, nn, ee):
+        value64 = base64.b64encode(value.encode("utf-8"))
+        cmd = "node ./tp_connected/encrypt_polyfill.js {0} {1} {2}".format(value64.decode('UTF-8'), nn, ee);
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
+
+        stdout, stderr = await proc.communicate()
+        if stdout and proc.returncode == 0:
+            return stdout.decode().strip();
+        elif stderr:
+            _LOGGER.error("Could not encrypt {0}: {1}".format(value, stderr.decode()))
+        else:
+            _LOGGER.error("Could not encrypt {0}: return code {1}".format(value, proc.returncode))
+
     async def encryptCredentials(self, password=None, username=None):
-        # try:
-        #     async with async_timeout.timeout(TIMEOUT):
-        #         url = self._url('cgi/getParm')
-        #         headers= { 'Referer': self._baseurl }
-
-        #         _LOGGER.info(url)
-        #         async with self.websession.post(url, headers=headers) as response:
-        #             if response.status != 200:
-        #                 _LOGGER.error("Invalid encryption key request")
-        #                 raise Error()
-                
-        #             result = await response.text()
-                
-                    
-
-        # except (asyncio.TimeoutError, ClientError, Error):
-        #     raise Error("Could not retrieve encryption key")
-
         if password is None:
             password = self.password
         else:
@@ -105,47 +100,45 @@ class MR6400:
         else:
             self.username = username
 
-        username64 = base64.b64encode(password.encode("utf-8"))
-        cmd = "node ./eternalegypt/encryptPolyfill.js {0} {1} {2}".format(username64.decode('UTF-8'), "C65F6A09263C7B4CCC58B98955634559E615A5A4462F0A8CCAA02195E0C8B6E2FA75D87CC6C80BC97B287879BE6916D4C8A2B4BCB2416FF96499770F5B4D68AFA5BE448D2316362623D9A0D2259CCFBD02FB480B3BAC13BF01A55004C19FCAF2F5783B29011422695495E03D3722DEF344C3BB3EDD5432B0C2EE0BCA3323A447", "010001");
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
+        try:
+            async with async_timeout.timeout(TIMEOUT):
+                url = self._url('cgi/getParm')
+                headers= { 'Referer': self._baseurl }
 
-        stdout, stderr = await proc.communicate()
-
-        #print(f'[{cmd!r} exited with {proc.returncode}]')
-        if stdout:
-            self._encryptedUsername = stdout.decode().strip();
-            print(f'[stdout]\n{stdout.decode()}')
-        if stderr:
-            print(f'[stderr]\n{stderr.decode()}')
+                _LOGGER.info(url)
+                async with self.websession.post(url, headers=headers) as response:
+                    if response.status != 200:
+                        _LOGGER.error("Invalid encryption key request")
+                        raise Error()
+                    responseText = await response.text()
+                    eeExp = re.compile(r'(?<=ee=")(.{5}(?:\s|.))', re.IGNORECASE)
+                    eeString = eeExp.search(responseText)
+                    if eeString:
+                        ee = eeString.group(1) 
+                    nnExp = re.compile(r'(?<=nn=")(.{255}(?:\s|.))', re.IGNORECASE)
+                    nnString = nnExp.search(responseText)
+                    if nnString:
+                        nn = nnString.group(1)   
+        except (asyncio.TimeoutError, ClientError, Error):
+            raise Error("Could not retrieve encryption key")
         
-
+        _LOGGER.debug("ee: {0} nn: {1}".format(ee, nn))  
         
-        password64 = base64.b64encode(password.encode("utf-8"))
-        cmd = "node ./eternalegypt/encryptPolyfill.js {0} {1} {2}".format(password64.decode('UTF-8'), "C65F6A09263C7B4CCC58B98955634559E615A5A4462F0A8CCAA02195E0C8B6E2FA75D87CC6C80BC97B287879BE6916D4C8A2B4BCB2416FF96499770F5B4D68AFA5BE448D2316362623D9A0D2259CCFBD02FB480B3BAC13BF01A55004C19FCAF2F5783B29011422695495E03D3722DEF344C3BB3EDD5432B0C2EE0BCA3323A447", "010001");
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
+        self._encryptedUsername = await self.encryptString(username, nn, ee)
+        _LOGGER.debug("Encrypted username: {0}".format(self._encryptedUsername))
 
-        stdout, stderr = await proc.communicate()
+        self._encryptedPassword = await self.encryptString(password, nn, ee)
+        _LOGGER.debug("Encrypted password: {0}".format(self._encryptedUsername))
 
-        print(f'[{cmd!r} exited with {proc.returncode}]')
-        if stdout:
-            self._encryptedPassword = stdout.decode().strip();
-            print(f'[stdout]\n{stdout.decode()}')
-        if stderr:
-            print(f'[stderr]\n{stderr.decode()}')
-
-        print("_______{0}_________{1}_____".format(self._encryptedUsername, self._encryptedPassword))
+        # TODO: without this sleep there's a strange behaviour in the following network request.
+        # I need to understand if the problem is caused by the router or the aiohttp API
+        await asyncio.sleep(1)
 
     
     async def login(self, password=None, username=None):
-        """Create a session with the modem and update the token id."""
-        await self.encryptCredentials(password, username)
         try:
+            """Create a session with the modem and update the token id."""
+            await self.encryptCredentials(password, username)
             async with async_timeout.timeout(TIMEOUT):
                 url = self._url('cgi/login')
                 params = {'UserName': self._encryptedUsername, 'Passwd': self._encryptedPassword, 'Action': '1', 'LoginStatus':'0' }
