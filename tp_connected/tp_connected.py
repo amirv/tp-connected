@@ -8,6 +8,7 @@ from aiohttp.client_exceptions import ClientError
 import async_timeout
 import attr
 import base64
+from .tp_link_encryption import tp_link_encryption
 
 TIMEOUT = 3
 
@@ -75,19 +76,7 @@ class MR6400:
 
     async def encryptString(self, value, nn, ee):
         value64 = base64.b64encode(value.encode("utf-8"))
-        cmd = "node ./tp_connected/encrypt_polyfill.js {0} {1} {2}".format(value64.decode('UTF-8'), nn, ee);
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
-
-        stdout, stderr = await proc.communicate()
-        if stdout and proc.returncode == 0:
-            return stdout.decode().strip();
-        elif stderr:
-            _LOGGER.error("Could not encrypt {0}: {1}".format(value, stderr.decode()))
-        else:
-            _LOGGER.error("Could not encrypt {0}: return code {1}".format(value, proc.returncode))
+        return tp_link_encryption.enc(value64.decode('UTF-8'), nn, ee)    
 
     async def encryptCredentials(self, password=None, username=None):
         if password is None:
@@ -128,7 +117,7 @@ class MR6400:
         _LOGGER.debug("Encrypted username: {0}".format(self._encryptedUsername))
 
         self._encryptedPassword = await self.encryptString(password, nn, ee)
-        _LOGGER.debug("Encrypted password: {0}".format(self._encryptedUsername))
+        _LOGGER.debug("Encrypted password: {0}".format(self._encryptedPassword))
 
         # TODO: without this sleep there's a strange behaviour in the following network request.
         # I need to understand if the problem is caused by the router or the aiohttp API
@@ -146,14 +135,16 @@ class MR6400:
 
                 _LOGGER.info(url)
                 async with self.websession.post(url, params=params, headers=headers) as response:
-                    print(response)
                     if response.status != 200:
                         _LOGGER.error("Invalid login request")
                         raise Error()
-                    
+                    hasSessionId = False
                     for cookie in self.websession.cookie_jar:
                         if cookie["domain"] == self.hostname and cookie.key == 'JSESSIONID':
+                            hasSessionId = True
                             _LOGGER.debug("Session id: %s", cookie.value)
+                    if not hasSessionId:
+                        raise Error("Inavalid credentials")
 
                 await self.getToken()
 
