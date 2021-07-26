@@ -11,13 +11,14 @@ import base64
 from .tp_link_encryption import tp_link_encryption
 
 TIMEOUT = 3
+LOGIN_TIMEOUT = 300
 
 _LOGGER = logging.getLogger(__name__)
 
 class Error(Exception):
     """Base class for all exceptions."""
 
-def autologin(function, timeout=TIMEOUT):
+def autologin(function, timeout=TIMEOUT, login_timeout=LOGIN_TIMEOUT):
     """Decorator that will try to login and redo an action before failing."""
     @wraps(function)
     async def wrapper(self, *args, **kwargs):
@@ -30,7 +31,7 @@ def autologin(function, timeout=TIMEOUT):
 
         _LOGGER.debug("autologin")
         try:
-            async with async_timeout.timeout(timeout):
+            async with async_timeout.timeout(login_timeout):
                 await self.login()
                 return await function(self, *args, **kwargs)
         except (asyncio.TimeoutError, ClientError, Error):
@@ -90,7 +91,7 @@ class MR6400:
             self.username = username
 
         try:
-            async with async_timeout.timeout(TIMEOUT):
+            async with async_timeout.timeout(LOGIN_TIMEOUT):
                 url = self._url('cgi/getParm')
                 headers= { 'Referer': self._baseurl }
 
@@ -128,7 +129,7 @@ class MR6400:
         try:
             """Create a session with the modem and update the token id."""
             await self.encryptCredentials(password, username)
-            async with async_timeout.timeout(TIMEOUT):
+            async with async_timeout.timeout(LOGIN_TIMEOUT):
                 url = self._url('cgi/login')
                 params = {'UserName': self._encryptedUsername, 'Passwd': self._encryptedPassword, 'Action': '1', 'LoginStatus':'0' }
                 headers= { 'Referer': self._baseurl }
@@ -153,7 +154,7 @@ class MR6400:
 
     async def getToken(self):
         try:
-            async with async_timeout.timeout(TIMEOUT):
+            async with async_timeout.timeout(LOGIN_TIMEOUT):
                 url = self._url('')
                 _LOGGER.info("Token url %s", url)
                 async with self.websession.get(url) as response:
@@ -186,6 +187,8 @@ class MR6400:
         headers= { 'Referer': self._baseurl, 'TokenID': self.token }
         async with self.websession.post(url, params=params, data=data, headers=headers) as response:
             _LOGGER.debug("Sent message with status %d", response.status)
+            if response.status != 200:
+                raise Error("Failed sending SMS")
 
 
 class Modem(MR6400):
